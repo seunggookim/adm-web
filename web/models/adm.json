@@ -1,0 +1,14 @@
+{
+  "version": "4e8227c1455d",
+  "frame_sec": 0.09287981859410431,
+  "sample_rate": 44100,
+  "hop": 512,
+  "win": 2048,
+  "down": 8,
+  "alpha": 0.65,
+  "beta": 0.34,
+  "euler_steps": 100,
+  "ic_runs": 4,
+  "entropy_runs": 1,
+  "max_frames": 4600
+}

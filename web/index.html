@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; connect-src 'self' https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:">
+<title>Musical Surprise Calculator</title>
+<!--
+  IC of the ADM (pa-audioic) for audio files, computed in the browser
+  (app.js, adm.js; ONNX graphs from code/python/admonnx.py), read from
+  models/ next to the page (locally a link to local/adm-onnx; ?models=URL to
+  override). Locally: serve the repository root (`python3 -m http.server`) and
+  open http://localhost:8000/code/web/index.html. Published with GitHub Pages
+  from MusicPerceptModeling/adm-web (makesite.sh).
+  HISTORY
+  2026-11-20: written (SG) (agent)
+  2026-11-20: entropy (SG) (agent)
+  2026-11-20: folders and batch output (SG) (agent)
+  2026-11-21: footer (attribution, licence, privacy) for publication (SG) (agent)
+  2026-11-21: plot (plot.js) (SG) (agent)
+-->
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --panel: #f5f5f7; --line: #d2d2d7;
+          --accent: #0a66c2; --ok: #1a7f37; --bad: #c62828; --drop: #eef4fb; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #161618; --fg: #f2f2f4; --muted: #a1a1a6; --panel: #222225;
+      --line: #3a3a3f; --accent: #5aa2ff; --ok: #4cc26b; --bad: #ff6b6b; --drop: #1d2836; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; margin: 0; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  p.note { color: var(--muted); margin: 4px 0 14px; }
+  #status { margin: 10px 0; } .ok { color: var(--ok); } .bad { color: var(--bad); }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 24px 16px; text-align: center;
+          background: var(--drop); }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: center; margin-top: 12px; }
+  main > .buttons { justify-content: flex-start; }
+  button { font: inherit; padding: 5px 14px; border-radius: 8px; border: 1px solid var(--accent);
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  #batch { color: var(--muted); }
+  #drop.over { border-color: var(--accent); }
+  #drop.disabled { opacity: .5; }
+  .settings { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 14px 0; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  input[type=text], input[type=number] { width: 7em; font: inherit; padding: 2px 6px; background: var(--bg); color: var(--fg);
+         border: 1px solid var(--line); border-radius: 6px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin-top: 14px; font-variant-numeric: tabular-nums; }
+  td, th { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; }
+  progress { width: 120px; }
+  a { color: var(--accent); }
+  button.small { padding: 1px 10px; font-size: .9em; }
+  /* Plot (plot.js): reference palette, categorical slots 1-8, validated on #fff (light) and #161618 (dark) */
+  .viz-root { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+    --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+    --grid: #e8e8ea; --axis: #b0b0b5; --hair: #6e6e73; margin: 22px 0 0; }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+      --series-4: #c98500; --series-5: #d55181; --series-6: #0ca30c; --series-7: #9085e9; --series-8: #e66767;
+      --grid: #2c2c30; --axis: #55555a; --hair: #a1a1a6; }
+  }
+  :root[data-theme="dark"] .viz-root { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+      --series-4: #c98500; --series-5: #d55181; --series-6: #0ca30c; --series-7: #9085e9; --series-8: #e66767;
+      --grid: #2c2c30; --axis: #55555a; --hair: #a1a1a6; }
+  .viz-root figcaption { font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
+  .viz-root .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); font-size: .9em; }
+  .viz-root .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .plotwrap { position: relative; }
+  .plotwrap svg { width: 100%; height: auto; display: block; }
+  .viz-root .line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+  .viz-root .grid { stroke: var(--grid); stroke-width: 1; }
+  .viz-root .axis { stroke: var(--axis); stroke-width: 1; }
+  .viz-root .hair { stroke: var(--hair); stroke-width: 1; }
+  .viz-root .dot { stroke: var(--bg); stroke-width: 2; }
+  .viz-root .tick { fill: var(--muted); font-size: 12px; }
+  .viz-root .ptitle { fill: var(--fg); font-size: 13px; font-weight: 600; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+         border-radius: 8px; padding: 6px 10px; font-size: .88em; font-variant-numeric: tabular-nums;
+         box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; }
+  .tip .tiptime { color: var(--muted); margin-bottom: 2px; }
+  .tip .lkey { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 6px; }
+  footer { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 8px; font-size: .9em; }
+  footer p { margin: 6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Musical surprise and uncertainty from audio</h1>
+  <p class="note">Information content (IC, surprise) and entropy (uncertainty) of each 93-ms frame, from the audio-based autoregressive diffusion model
+    (ADM; Bjare et al., 2026). Everything is computed in this browser: your audio files are never uploaded.</p>
+  <div id="status">Starting…</div>
+  <div class="settings">
+    <label>Noise levels <input id="levels" type="text" value="0.6" title="Comma-separated, in [0, 1); 0.6 as in the paper"></label>
+    <label><input id="entropy" type="checkbox" checked> Entropy</label>
+    <label>Samples <input id="samples" type="number" value="32" min="1" title="Monte Carlo samples per frame for entropy (32 as in the paper; more are slower but less noisy)"></label>
+    <label>Seed <input id="seed" type="number" value="0" min="0" title="For the random numbers of the estimators"></label>
+  </div>
+  <div id="drop" class="disabled">Drop audio files or folders here (WAV, MP3, FLAC, M4A, …)
+    <div class="buttons"><button id="pickFiles" disabled>Choose files…</button>
+      <button id="pickFolder" disabled>Choose folder…</button></div>
+    <input id="fileInput" type="file" accept="audio/*,.flac,.m4a" multiple hidden>
+    <input id="folderInput" type="file" webkitdirectory multiple hidden></div>
+  <div class="buttons"><button id="zipBtn" disabled>Download all (ZIP)</button>
+    <button id="folderBtn" hidden title="Writes each CSV there as soon as it is done">Save to folder…</button>
+    <span id="batch"></span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>File</th><th>Status</th><th>Progress</th><th>Result</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table></div>
+  <div id="plot"></div>
+  <p class="note">CSV columns as <code>admcompute.py</code>: Frame, Time (s, start of the frame), IC_&lt;t&gt; and Entropy_&lt;t&gt; (nats) for each noise level t;
+    leading and trailing silence (60 dB) is NaN. Folders are searched recursively; the ZIP and the output folder keep their structure and add
+    <code>adm-web-log.json</code> (settings, model version, frames and time per file). Up to about 7 min per file. Entropy takes most of the time (32 Monte Carlo samples, with a variance reduction: frame-wise values repeat with r ≈ .97–.99 at t = 0.6);
+    for entropy, noise levels must be multiples of 0.01.</p>
+  <footer class="note">
+    <p><strong>Privacy.</strong> Your audio is decoded and analysed on your own computer and is never uploaded.
+      The page downloads only the ONNX Runtime library (jsDelivr) and the model files (this site).</p>
+    <p><strong>Model.</strong> Perceptually aligned autoregressive rectified flow (pa-audioic; Bjare, Cantisani, Pasini,
+      Lattner &amp; Widmer, 2026, EUSIPCO) on Music2Latent latents (pa-music2latent; Pasini, Lattner &amp; Fazekas, 2024,
+      ISMIR), from the Institute of Computational Perception, Johannes Kepler University Linz
+      (<a href="https://github.com/CPJKU/pa-audioic">github.com/CPJKU/pa-audioic</a>). The weights are licensed under
+      <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>; for this page they were converted to ONNX
+      without changing them. Non-commercial use only.</p>
+    <p><strong>Differences from pa-audioic.</strong> The encoder, which turns the audio into 93-ms latent frames, runs on
+      30-s windows inside pa-audioic's 60-s chunks (a whole 60-s chunk does not fit in browser memory), which changes the
+      latents slightly; the model's
+      predictive context still spans the whole excerpt (up to about 7 min). Like pa-audioic, IC and entropy are Monte Carlo
+      estimates: this page's values differ from a pa-audioic run about as much as two pa-audioic runs with different
+      random seeds.</p>
+    <p><strong>Length.</strong> The model's context holds at most 4,600 frames (about 7.1 min), so longer files are not
+      analysed. IC depends strongly on how much music precedes a frame, so cutting a longer piece into separate excerpts
+      gives each excerpt its own start, with higher IC at the beginning.</p>
+    <p><strong>Source.</strong> <a href="https://github.com/MusicPerceptModeling/adm-web">github.com/MusicPerceptModeling/adm-web</a></p>
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
